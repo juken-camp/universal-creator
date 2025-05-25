@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>UNIVERSAL CREATOR - 宇宙創造シミュレーター</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        body {
+            background: radial-gradient(circle, #0a0a0f 0%, #000000 100%);
+            height: 100vh;
+            overflow: hidden;
+            color: white;
+            font-family: 'Courier New', monospace;
+        }
+        
+        #canvas {
+            background: transparent;
+            cursor: crosshair;
+            touch-action: none;
+        }
+        
+        .title {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.1em;
+            font-weight: 100;
+            letter-spacing: 2px;
+            color: #ffffff;
+            cursor: pointer;
+            z-index: 1000;
+            opacity: 0.9;
+        }
+        
+        .master-panel {
+            position: fixed;
+            top: 35px;
+            left: 10px;
+            color: #aaaaaa;
+            z-index: 1000;
+            font-size: 0.65em;
+            line-height: 1.3;
+            background: rgba(0,0,0,0.8);
+            padding: 8px;
+            border-radius: 3px;
+            border: 1px solid rgba(255,255,255,0.1);
+            max-width: 200px;
+        }
+        
+        .beauty-score {
+            position: fixed;
+            bottom: 140px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: 2px solid #4080ff;
+            color: #4080ff;
+            font-size: 0.8em;
+            text-align: center;
+            z-index: 1000;
+        }
+        
+        .beauty-info {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.6em;
+            opacity: 0.6;
+            text-align: center;
+            z-index: 1000;
+            color: #888888;
+        }
+        
+        .controls {
+            position: fixed;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 6px;
+            z-index: 1000;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .control-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #999999;
+            padding: 5px 10px;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.7em;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #cccccc;
+        }
+        
+        .instruction {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7em;
+            opacity: 0.5;
+            text-align: center;
+            z-index: 1000;
+            color: #666666;
+        }
+        
+        @media (max-width: 480px) {
+            .title { font-size: 1.0em; }
+            .master-panel { font-size: 0.6em; padding: 6px; max-width: 150px; }
+            .controls { gap: 4px; }
+            .control-btn { padding: 4px 8px; font-size: 0.65em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="title" onclick="resetDimension()">UNIVERSAL CREATOR</div>
+    
+    <div class="master-panel" id="master-panel">
+        Master Level: 1<br>
+        経験値: 0/100<br>
+        発見: 0/8<br>
+        グラビティ: 0<br>
+        パーティクル: 0
+    </div>
+    
+    <div class="beauty-score" id="beauty-score">
+        Beauty Score: 0.00<br>
+        <small>安定性 • 調和性 • 複雑性</small>
+    </div>
+    
+    <div class="beauty-info">
+        安定性: 軌道の安定さ | 調和性: 粒子の配置バランス | 複雑性: システムの豊かさ
+    </div>
+    
+    <canvas id="canvas"></canvas>
+    
+    <div class="instruction">
+        タップして見えない重力ポイントを作り、美しい宇宙構造を作ろう
+    </div>
+    
+    <div class="controls">
+        <div class="control-btn" onclick="resetDimension()">リセット</div>
+        <div class="control-btn" onclick="togglePhysics()">ポーズ</div>
+        <div class="control-btn" onclick="adjustTimeFlow()">スピード</div>
+        <div class="control-btn" onclick="adjustDensity()">マター</div>
+        <div class="control-btn" onclick="showDiscoveries()">発見リスト</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const masterPanel = document.getElementById('master-panel');
+        const beautyScore = document.getElementById('beauty-score');
+        
+        // ゲーム状態管理
+        let masterData = {
+            level: parseInt(localStorage.getItem('masterLevel')) || 1,
+            experience: parseInt(localStorage.getItem('masterExp')) || 0,
+            expRequired: 100,
+            discoveries: JSON.parse(localStorage.getItem('discoveries')) || {},
+            beautyRecord: parseFloat(localStorage.getItem('beautyRecord')) || 0
+        };
+        
+        // 発見できる現象
+        const discoveries = {
+            'first_orbit': { name: '初軌道', description: '最初の安定した軌道を作った', exp: 10 },
+            'binary_system': { name: '連星システム', description: '2つの重力源が回り合うシステム', exp: 20 },
+            'accretion_disk': { name: 'アクリーションディスク', description: '重力源の周りにパーティクルの円盤', exp: 25 },
+            'triple_system': { name: 'トリプルシステム', description: '3つの重力源が共存するシステム', exp: 50 },
+            'perfect_symmetry': { name: 'パーフェクトシンメトリー', description: '完璧な対称構造を作った', exp: 60 },
+            'stable_ecosystem': { name: 'ステーブルエコシステム', description: '長時間安定したパーティクルシステム', exp: 100 },
+            'high_complexity': { name: 'ハイコンプレクシティ', description: '複雑で高度な構造を作った', exp: 80 },
+            'harmony_master': { name: 'ハーモニーマスター', description: '完璧なパーティクル配置を達成', exp: 90 }
+        };
+        
+        // 物理オブジェクト
+        let gravityWells = [];
+        let particles = [];
+        let isPhysicsRunning = true;
+        let timeFlow = 1.0;
+        let particleDensity = 1.0;
+        let universeTime = 0;
+        let animationId;
+        
+        // Beauty Score評価
+        let beautyMetrics = {
+            stability: 0,
+            harmony: 0,
+            complexity: 0
+        };
+        
+        // カメラとタッチ制御
+        let camera = { angleX: 0, angleY: 0, distance: 500, targetAngleX: 0, targetAngleY: 0 };
+        let isCreatingWell = false;
+        let wellCreationStart = 0;
+        let currentWellPos = { x: 0, y: 0 };
+        let lastTouch = { x: 0, y: 0 };
+        let isDragging = false;
+        
+        const MAX_PARTICLES = 80;
+        
+        // キャンバス設定
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        // 3D投影
+        function project3D(x, y, z) {
+            try {
+                const cosX = Math.cos(camera.angleX);
+                const sinX = Math.sin(camera.angleX);
+                const cosY = Math.cos(camera.angleY);
+                const sinY = Math.sin(camera.angleY);
+                
+                const x1 = x * cosY - z * sinY;
+                const z1 = x * sinY + z * cosY;
+                const y1 = y * cosX - z1 * sinX;
+                const z2 = y * sinX + z1 * cosX;
+                
+                const perspective = camera.distance;
+                const depth = z2 + perspective;
+                
+                if (depth <= 1) return null;
+                
+                return {
+                    x: canvas.width / 2 + (x1 * perspective) / depth,
+                    y: canvas.height / 2 + (y1 * perspective) / depth,
+                    scale: Math.max(0.1, perspective / depth),
+                    depth: depth
+                };
+            } catch (e) {
+                return null;
+            }
+        }
+        
+        // 見えないグラビティウェル
+        class InvisibleGravityWell {
+            constructor(x, y, z, strength) {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                this.strength = Math.max(0.1, Math.min(3, strength));
+                this.age = 0;
+                this.maxAge = 5000 + Math.random() * 3000;
+                this.radius = 15 + this.strength * 10;
+                this.mass = this.strength * 2;
+                this.accretedMass = 0;
+                this.pulsePhase = Math.random() * Math.PI * 2;
+            }
+            
+            update() {
+                if (!isPhysicsRunning) return true;
+                
+                this.age += timeFlow;
+                this.pulsePhase += 0.05 * timeFlow;
+                
+                if (this.accretedMass > 0) {
+                    this.mass += this.accretedMass * 0.001;
+                    this.strength = this.mass / 2;
+                    this.radius = 15 + this.strength * 10;
+                    this.accretedMass *= 0.98;
+                }
+                
+                return this.age < this.maxAge && this.strength > 0.05;
+            }
+            
+            draw() {
+                // 見えない（アクリーションディスクのヒントのみ）
+                if (this.accretedMass > 5) {
+                    const projected = project3D(this.x, this.y, this.z);
+                    if (!projected || projected.depth < 0) return;
+                    
+                    // 薄いディスクのヒント
+                    for (let ring = 1; ring <= 2; ring++) {
+                        const diskRadius = this.radius * (1.5 + ring * 0.5) * projected.scale;
+                        const alpha = 0.08 / ring;
+                        
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([2, 6]);
+                        ctx.beginPath();
+                        ctx.arc(projected.x, projected.y, diskRadius, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+            }
+            
+            getGravityForce(particle) {
+                try {
+                    const dx = this.x - particle.x;
+                    const dy = this.y - particle.y;
+                    const dz = this.z - particle.z;
+                    const distance3D = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    
+                    if (distance3D < this.radius) {
+                        this.accretedMass += particle.mass || 0.1;
+                        return null; // 吸収
+                    }
+                    
+                    if (distance3D < 1) return { fx: 0, fy: 0, fz: 0 };
+                    
+                    const force = (this.strength * 80) / (distance3D * distance3D);
+                    const fx = (dx / distance3D) * force;
+                    const fy = (dy / distance3D) * force;
+                    const fz = (dz / distance3D) * force;
+                    
+                    return { fx, fy, fz };
+                } catch (e) {
+                    return { fx: 0, fy: 0, fz: 0 };
+                }
+            }
+        }
+        
+        // 白いパーティクル
+        class WhiteParticle {
+            constructor() {
+                const boundary = 300;
+                const side = Math.floor(Math.random() * 6);
+                const speed = 0.4 + Math.random() * 0.8;
+                
+                if (side < 2) {
+                    this.x = (side === 0 ? -1 : 1) * boundary;
+                    this.y = (Math.random() - 0.5) * boundary;
+                    this.z = (Math.random() - 0.5) * boundary;
+                    this.vx = (side === 0 ? 1 : -1) * speed;
+                    this.vy = (Math.random() - 0.5) * 0.5;
+                    this.vz = (Math.random() - 0.5) * 0.5;
+                } else if (side < 4) {
+                    this.x = (Math.random() - 0.5) * boundary;
+                    this.y = (side === 2 ? -1 : 1) * boundary;
+                    this.z = (Math.random() - 0.5) * boundary;
+                    this.vx = (Math.random() - 0.5) * 0.5;
+                    this.vy = (side === 2 ? 1 : -1) * speed;
+                    this.vz = (Math.random() - 0.5) * 0.5;
+                } else {
+                    this.x = (Math.random() - 0.5) * boundary;
+                    this.y = (Math.random() - 0.5) * boundary;
+                    this.z = (side === 4 ? -1 : 1) * boundary;
+                    this.vx = (Math.random() - 0.5) * 0.5;
+                    this.vy = (Math.random() - 0.5) * 0.5;
+                    this.vz = (side === 4 ? 1 : -1) * speed;
+                }
+                
+                this.mass = 0.1;
+                this.trail = [];
+                this.maxTrailLength = 20;
+                this.life = 1.0;
+                this.age = 0;
+                this.size = 1.5;
+                this.speed = 0;
+                this.orbitStability = 0;
+            }
+            
+            update() {
+                if (!isPhysicsRunning) return true;
+                
+                try {
+                    this.age += timeFlow;
+                    
+                    // 重力計算
+                    let totalFx = 0, totalFy = 0, totalFz = 0;
+                    let absorbed = false;
+                    
+                    gravityWells.forEach(well => {
+                        const force = well.getGravityForce(this);
+                        if (force === null) {
+                            absorbed = true;
+                            return;
+                        }
+                        totalFx += force.fx || 0;
+                        totalFy += force.fy || 0;
+                        totalFz += force.fz || 0;
+                    });
+                    
+                    if (absorbed) return false;
+                    
+                    // 物理更新
+                    const damping = 0.002;
+                    totalFx -= this.vx * damping;
+                    totalFy -= this.vy * damping;
+                    totalFz -= this.vz * damping;
+                    
+                    this.vx += (totalFx / this.mass) * timeFlow;
+                    this.vy += (totalFy / this.mass) * timeFlow;
+                    this.vz += (totalFz / this.mass) * timeFlow;
+                    
+                    // スピード制限
+                    const maxSpeed = 8;
+                    this.speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy + this.vz * this.vz);
+                    if (this.speed > maxSpeed) {
+                        this.vx = (this.vx / this.speed) * maxSpeed;
+                        this.vy = (this.vy / this.speed) * maxSpeed;
+                        this.vz = (this.vz / this.speed) * maxSpeed;
+                        this.speed = maxSpeed;
+                    }
+                    
+                    // トレイル記録
+                    this.trail.push({ x: this.x, y: this.y, z: this.z });
+                    if (this.trail.length > this.maxTrailLength) {
+                        this.trail.shift();
+                    }
+                    
+                    // 軌道安定性
+                    if (this.trail.length > 10) {
+                        const recentTrail = this.trail.slice(-10);
+                        const distances = recentTrail.map(point => 
+                            Math.sqrt(point.x * point.x + point.y * point.y + point.z * point.z)
+                        );
+                        const avgDistance = distances.reduce((sum, d) => sum + d, 0) / distances.length;
+                        const variance = distances.reduce((sum, d) => sum + Math.pow(d - avgDistance, 2), 0) / distances.length;
+                        this.orbitStability = Math.max(0, 100 - variance);
+                    }
+                    
+                    // 位置更新
+                    this.x += this.vx * timeFlow;
+                    this.y += this.vy * timeFlow;
+                    this.z += this.vz * timeFlow;
+                    
+                    // 寿命
+                    if (this.age > 600) {
+                        this.life -= 0.002 * timeFlow;
+                    }
+                    
+                    // 境界チェック
+                    const boundary = 400;
+                    const distance = Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+                    return this.life > 0 && distance < boundary;
+                    
+                } catch (e) {
+                    return false;
+                }
+            }
+            
+            draw() {
+                try {
+                    // 白いトレイル（点線風）
+                    if (this.trail.length > 1) {
+                        for (let i = 2; i < this.trail.length; i += 2) {
+                            const prev = project3D(this.trail[i - 1].x, this.trail[i - 1].y, this.trail[i - 1].z);
+                            const curr = project3D(this.trail[i].x, this.trail[i].y, this.trail[i].z);
+                            
+                            if (!prev || !curr || prev.depth < 0 || curr.depth < 0) continue;
+                            
+                            const alpha = (i / this.trail.length) * this.life * 0.25;
+                            const width = (i / this.trail.length) * 1.5 * curr.scale;
+                            
+                            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                            ctx.lineWidth = Math.max(0.5, width);
+                            ctx.lineCap = 'round';
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(prev.x, prev.y);
+                            ctx.lineTo(curr.x, curr.y);
+                            ctx.stroke();
+                        }
+                    }
+                    
+                    // パーティクル本体
+                    const projected = project3D(this.x, this.y, this.z);
+                    if (!projected || projected.depth < 0) return;
+                    
+                    const size = this.size * projected.scale;
+                    const alpha = this.life * Math.max(0.3, projected.scale);
+                    
+                    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(projected.x, projected.y, Math.max(1, size), 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                } catch (e) {
+                    // エラー無視
+                }
+            }
+        }
+        
+        // Beauty Score計算
+        function calculateBeautyScore() {
+            if (particles.length < 3 || gravityWells.length === 0) {
+                beautyMetrics = { stability: 0, harmony: 0, complexity: 0 };
+                return 0;
+            }
+            
+            // 安定性: パーティクル軌道の安定さ
+            const stableParticles = particles.filter(p => p.orbitStability > 50).length;
+            const stabilityScore = Math.min(100, (stableParticles / particles.length) * 100);
+            
+            // 調和性: パーティクル配置のバランス
+            const centerX = particles.reduce((sum, p) => sum + p.x, 0) / particles.length;
+            const centerY = particles.reduce((sum, p) => sum + p.y, 0) / particles.length;
+            
+            const angles = particles.map(p => Math.atan2(p.y - centerY, p.x - centerX));
+            angles.sort((a, b) => a - b);
+            
+            const angleDiffs = [];
+            for (let i = 0; i < angles.length; i++) {
+                const nextAngle = angles[(i + 1) % angles.length];
+                let diff = nextAngle - angles[i];
+                if (diff < 0) diff += Math.PI * 2;
+                angleDiffs.push(diff);
+            }
+            
+            const avgAngleDiff = angleDiffs.reduce((sum, d) => sum + d, 0) / angleDiffs.length;
+            const angleVariance = angleDiffs.reduce((sum, d) => sum + Math.pow(d - avgAngleDiff, 2), 0) / angleDiffs.length;
+            const harmonyScore = Math.max(0, 100 - angleVariance * 50);
+            
+            // 複雑性: システムの豊かさ
+            const complexityScore = Math.min(100, 
+                (gravityWells.length * 20) + 
+                (particles.length * 1) + 
+                (gravityWells.reduce((sum, w) => sum + w.accretedMass, 0) * 2)
+            );
+            
+            beautyMetrics.stability = stabilityScore;
+            beautyMetrics.harmony = harmonyScore;
+            beautyMetrics.complexity = complexityScore;
+            
+            const totalScore = (stabilityScore + harmonyScore + complexityScore) / 3;
+            
+            if (totalScore > masterData.beautyRecord) {
+                masterData.beautyRecord = totalScore;
+                localStorage.setItem('beautyRecord', totalScore.toString());
+            }
+            
+            return totalScore;
+        }
+        
+        // 発見チェック
+        function checkDiscoveries() {
+            const newDiscoveries = [];
+            
+            if (!masterData.discoveries['first_orbit'] && particles.some(p => p.trail.length > 15)) {
+                newDiscoveries.push('first_orbit');
+            }
+            
+            if (!masterData.discoveries['accretion_disk'] && gravityWells.some(w => w.accretedMass > 3)) {
+                newDiscoveries.push('accretion_disk');
+            }
+            
+            if (!masterData.discoveries['triple_system'] && gravityWells.length >= 3) {
+                newDiscoveries.push('triple_system');
+            }
+            
+            if (!masterData.discoveries['perfect_symmetry'] && beautyMetrics.harmony > 80) {
+                newDiscoveries.push('perfect_symmetry');
+            }
+            
+            if (!masterData.discoveries['stable_ecosystem'] && beautyMetrics.stability > 70) {
+                newDiscoveries.push('stable_ecosystem');
+            }
+            
+            if (!masterData.discoveries['high_complexity'] && beautyMetrics.complexity > 80) {
+                newDiscoveries.push('high_complexity');
+            }
+            
+            if (!masterData.discoveries['harmony_master'] && beautyMetrics.harmony > 90) {
+                newDiscoveries.push('harmony_master');
+            }
+            
+            // 新発見処理
+            newDiscoveries.forEach(discoveryId => {
+                if (discoveries[discoveryId]) {
+                    masterData.discoveries[discoveryId] = true;
+                    addExperience(discoveries[discoveryId].exp);
+                }
+            });
+            
+            localStorage.setItem('discoveries', JSON.stringify(masterData.discoveries));
+        }
+        
+        // 経験値追加
+        function addExperience(exp) {
+            masterData.experience += exp;
+            
+            while (masterData.experience >= masterData.expRequired) {
+                masterData.experience -= masterData.expRequired;
+                masterData.level++;
+                masterData.expRequired = Math.floor(masterData.expRequired * 1.15);
+            }
+            
+            localStorage.setItem('masterLevel', masterData.level.toString());
+            localStorage.setItem('masterExp', masterData.experience.toString());
+        }
+        
+        // パーティクル生成
+        function spawnParticles() {
+            try {
+                const spawnRate = Math.floor(2 * particleDensity);
+                if (particles.length < MAX_PARTICLES && gravityWells.length > 0) {
+                    for (let i = 0; i < spawnRate; i++) {
+                        particles.push(new WhiteParticle());
+                    }
+                }
+            } catch (e) {
+                // エラー無視
+            }
+        }
+        
+        // カメラ更新
+        function updateCamera() {
+            camera.angleX += (camera.targetAngleX - camera.angleX) * 0.1;
+            camera.angleY += (camera.targetAngleY - camera.angleY) * 0.1;
+        }
+        
+        // アニメーション
+        function animate() {
+            try {
+                universeTime += 0.016 * timeFlow;
+                
+                // 背景
+                ctx.fillStyle = 'rgba(5, 5, 10, 0.15)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                updateCamera();
+                
+                // グラビティウェル更新
+                gravityWells = gravityWells.filter(well => {
+                    const alive = well.update();
+                    if (alive) {
+                        well.draw();
+                    }
+                    return alive;
+                });
+                
+                // パーティクル処理
+                spawnParticles();
+                particles = particles.filter(particle => {
+                    const alive = particle.update();
+                    if (alive) {
+                        particle.draw();
+                    }
+                    return alive;
+                });
+                
+                // 発見チェック
+                checkDiscoveries();
+                
+                // UI更新
+                updateUI();
+                
+                animationId = requestAnimationFrame(animate);
+                
+            } catch (e) {
+                console.log('エラー発生、リセット中...');
+                resetDimension();
+            }
+        }
+        
+        // UI更新
+        function updateUI() {
+            const discoveryCount = Object.keys(masterData.discoveries).filter(key => masterData.discoveries[key]).length;
+            const totalDiscoveries = Object.keys(discoveries).length;
+            
+            masterPanel.innerHTML = `
+                Master Level: ${masterData.level}<br>
+                経験値: ${masterData.experience}/${masterData.expRequired}<br>
+                発見: ${discoveryCount}/${totalDiscoveries}<br>
+                グラビティ: ${gravityWells.length}<br>
+                パーティクル: ${particles.length}
+            `;
+            
+            const currentBeauty = calculateBeautyScore();
+            beautyScore.innerHTML = `
+                Beauty Score: ${currentBeauty.toFixed(2)}<br>
+                <small>安:${beautyMetrics.stability.toFixed(0)} 調:${beautyMetrics.harmony.toFixed(0)} 複:${beautyMetrics.complexity.toFixed(0)}</small>
+            `;
+        }
+        
+        // タッチ処理
+        function handleStart(x, y) {
+            lastTouch.x = x;
+            lastTouch.y = y;
+            isCreatingWell = true;
+            wellCreationStart = Date.now();
+            currentWellPos.x = x;
+            currentWellPos.y = y;
+        }
+        
+        function handleMove(x, y) {
+            if (isCreatingWell) {
+                // 作成中
+            } else {
+                const deltaX = x - lastTouch.x;
+                const deltaY = y - lastTouch.y;
+                
+                if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+                    isDragging = true;
+                    camera.targetAngleY += deltaX * 0.01;
+                    camera.targetAngleX += deltaY * 0.01;
+                    camera.targetAngleX = Math.max(-Math.PI/3, Math.min(Math.PI/3, camera.targetAngleX));
+                    
+                    lastTouch.x = x;
+                    lastTouch.y = y;
+                }
+            }
+        }
+        
+        function handleEnd(x, y) {
+            if (isCreatingWell) {
+                const holdTime = Date.now() - wellCreationStart;
+                const strength = Math.min(3, (holdTime / 1000) * 3 + 0.5);
+                
+                const worldX = (currentWellPos.x - canvas.width / 2) * 0.8;
+                const worldY = (currentWellPos.y - canvas.height / 2) * 0.8;
+                const worldZ = 0;
+                
+                gravityWells.push(new InvisibleGravityWell(worldX, worldY, worldZ, strength));
+                addExperience(1);
+                
+                isCreatingWell = false;
+            }
+            
+            setTimeout(() => { isDragging = false; }, 100);
+        }
+        
+        // イベントリスナー
+        canvas.addEventListener('mousedown', e => {
+            const rect = canvas.getBoundingClientRect();
+            handleStart(e.clientX - rect.left, e.clientY - rect.top);
+        });
+        
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            handleMove(e.clientX - rect.left, e.clientY - rect.top);
+        });
+        
+        canvas.addEventListener('mouseup', e => {
+            const rect = canvas.getBoundingClientRect();
+            handleEnd(e.clientX - rect.left, e.clientY - rect.top);
+        });
+        
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            handleStart(touch.clientX - rect.left, touch.clientY - rect.top);
+        });
+        
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            handleMove(touch.clientX - rect.left, touch.clientY - rect.top);
+        });
+        
+        canvas.addEventListener('touchend', e => {
+            e.preventDefault();
+            handleEnd(0, 0);
+        });
+        
+        // コントロール関数
+        function resetDimension() {
+            gravityWells = [];
+            particles = [];
+            universeTime = 0;
+            camera.targetAngleX = 0;
+            camera.targetAngleY = 0;
+        }
+        
+        function togglePhysics() {
+            isPhysicsRunning = !isPhysicsRunning;
+            const btn = document.querySelector('.control-btn:nth-child(2)');
+            btn.textContent = isPhysicsRunning ? 'ポーズ' : '再開';
+        }
+        
+        function adjustTimeFlow() {
+            timeFlow = timeFlow === 0.5 ? 1.0 : (timeFlow === 1.0 ? 2.0 : (timeFlow === 2.0 ? 5.0 : 0.5));
+            const btn = document.querySelector('.control-btn:nth-child(3)');
+            btn.textContent = `${timeFlow}x速度`;
+        }
+        
+        function adjustDensity() {
+            particleDensity = particleDensity === 0.5 ? 1.0 : (particleDensity === 1.0 ? 2.0 : 0.5);
+            const btn = document.querySelector('.control-btn:nth-child(4)');
+            btn.textContent = `${particleDensity}xマター`;
+        }
+        
+        function showDiscoveries() {
+            const discoveredList = Object.keys(masterData.discoveries)
+                .filter(key => masterData.discoveries[key])
+                .map(key => discoveries[key]?.name || key)
+                .join('、');
+            
+            alert(`発見したもの:\n\n${discoveredList || 'まだありません - 探索を続けよう！'}`);
+        }
+        
+        // 初期化
+        animate();
+        
+    </script>
+</body>
+</html>
