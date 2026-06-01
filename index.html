@@ -177,6 +177,7 @@
     <button id="btn-seed"><span class="ic">✸</span><span class="tx">銀河</span></button>
     <button id="btn-clear"><span class="ic">○</span><span class="tx">無</span></button>
     <button id="btn-sound"><span class="ic">♪</span><span class="tx">音</span></button>
+    <button id="btn-tilt"><span class="ic">◐</span><span class="tx">傾き</span></button>
     <button id="btn-disc"><span class="ic">✧</span><span class="tx">発見</span></button>
   </div>
 
@@ -191,7 +192,7 @@
 
   <div id="veil">
     <h1>宇宙を、その手で。</h1>
-    <p>触れて、見えない重力を置く。<br>やがて、光が集まりはじめる。</p>
+    <p>一本指でなぞって、光の流れを描く。<br>二本指で、宇宙をまわす。<br>長く押さえれば、重い星が生まれる。</p>
     <div class="cue">画面に触れて はじめる</div>
   </div>
 
@@ -388,7 +389,10 @@
     startVoice(w);
     return w;
   }
-  function clearWells(){ wells.forEach(w=>{ stopVoice(w); scene.remove(w.grp); }); wells = []; }
+  function clearWells(){
+    wells.forEach(w=>{ stopVoice(w); scene.remove(w.grp); }); wells = [];
+    for (const fl of filaments){ fl.active=false; fl.mass=0; fl.sp.visible=false; fl.sp.material.opacity=0; }
+  }
 
   /* ---------- transient effects (flashes + ripples) ---------- */
   const flashPool = [], FLASH_N = 80;
@@ -414,6 +418,29 @@
     const r = ripplePool[rippleIdx]; rippleIdx=(rippleIdx+1)%RIPPLE_N;
     r.sp.position.set(x,y,z); r.from=40; r.to=to; r.life=1; r.sp.visible=true;
   }
+
+  /* ---------- gravity filaments: the brush's fading ink ---------- */
+  const MAX_FILA = 18;
+  const filaments = [];
+  for (let i=0;i<MAX_FILA;i++){
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map:TEX_GLOW, color:0xcdd8ff,
+      transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false, depthTest:false }));
+    sp.visible=false; scene.add(sp);
+    filaments.push({ x:0,y:0,z:0, mass:0, life:0, max:1, sp, active:false });
+  }
+  function ink(x,y,z,mass,life){
+    let slot = filaments.find(f=>!f.active);
+    if (!slot) slot = filaments.reduce((a,b)=> a.life<b.life?a:b);
+    slot.x=x; slot.y=y; slot.z=z; slot.mass=mass; slot.life=1; slot.max=life; slot.active=true; slot.sp.visible=true;
+  }
+  const brushCursor = new THREE.Sprite(new THREE.SpriteMaterial({ map:TEX_GLOW, color:0xe9cda0,
+    transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false, depthTest:false }));
+  brushCursor.visible=false; scene.add(brushCursor);
+
+  /* ---------- device tilt: the universe in your hand ---------- */
+  let tiltOn=false, tiltNeutral=null;
+  const gTilt={x:0,z:0}, gTiltT={x:0,z:0};
+  const TILT = 0.022;
 
   /* ---------- simulation state ---------- */
   let running = true;
@@ -464,22 +491,28 @@
       w.vx*=0.9995; w.vy*=0.9995; w.vz*=0.9995;
     }
 
-    // particles vs wells
+    // particles vs wells + filaments + tilt
     const nW = wells.length;
-    if (nW === 0) {
-      // free drift, slow damp
+    let filaActive = 0; for (const fl of filaments) if (fl.active) filaActive++;
+    const tx = tiltOn ? gTilt.x*TILT*f : 0;
+    const tz = tiltOn ? gTilt.z*TILT*f : 0;
+
+    if (nW === 0 && filaActive === 0) {
+      // free drift, slow damp, gentle tilt current
       for (let i=0;i<activeCount;i++){
         const ix=i*3;
+        vel[ix]+=tx; vel[ix+2]+=tz;
         pos[ix]+=vel[ix]*f; pos[ix+1]+=vel[ix+1]*f; pos[ix+2]+=vel[ix+2]*f;
         aTemp[i] += (0.1 - aTemp[i])*0.05;
+        const dC = pos[ix]*pos[ix]+pos[ix+1]*pos[ix+1]+pos[ix+2]*pos[ix+2];
+        if (dC > BOUND*BOUND) spawnShell(i,true);
       }
     } else {
-      // flatten well data for the hot loop
       let stableCount = 0, considered = 0;
       for (let i=0;i<activeCount;i++){
         const ix=i*3;
         let px=pos[ix], py=pos[ix+1], pz=pos[ix+2];
-        let ax=0, ay=0, az=0;
+        let ax=tx, ay=0, az=tz;
         let nearest = 1e18, captured = -1;
         for (let k=0;k<nW;k++){
           const w = wells[k];
@@ -500,28 +533,33 @@
           spawnShell(i, true);
           continue;
         }
+        // the brush's fading ink — gentle attractors that bend matter along your stroke
+        for (let k=0;k<MAX_FILA;k++){
+          const fl = filaments[k]; if (!fl.active) continue;
+          const dx=fl.x-px, dy=fl.y-py, dz=fl.z-pz;
+          const d2=dx*dx+dy*dy+dz*dz;
+          const inv=1/Math.sqrt(d2+SOFT*3);
+          const a=G*fl.mass*inv*inv*inv*f;
+          ax+=dx*a; ay+=dy*a; az+=dz*a;
+        }
         let vx=vel[ix]+ax, vy=vel[ix+1]+ay, vz=vel[ix+2]+az;
         vx*=0.9992; vy*=0.9992; vz*=0.9992;
         const sp2 = vx*vx+vy*vy+vz*vz;
         const MAXS=11;
         if (sp2 > MAXS*MAXS){ const s=MAXS/Math.sqrt(sp2); vx*=s; vy*=s; vz*=s; }
         px+=vx*f; py+=vy*f; pz+=vz*f;
-        // recycle if it escapes
         const dCenter = px*px+py*py+pz*pz;
         if (dCenter > BOUND*BOUND){ spawnShell(i,true); continue; }
         vel[ix]=vx; vel[ix+1]=vy; vel[ix+2]=vz;
         pos[ix]=px; pos[ix+1]=py; pos[ix+2]=pz;
-        // temperature ~ speed (energy) -> color
         const tgt = Math.min(1, Math.sqrt(sp2)/8.0);
         aTemp[i] += (tgt - aTemp[i])*0.18;
-        // stability proxy: change in nearest-radius
         const nr = Math.sqrt(nearest);
         const dr = Math.abs(nr - rPrev[i]); rPrev[i]=nr;
         const st = Math.max(0, 1 - dr*0.18);
         stab[i] += (st - stab[i])*0.06;
-        if (nr < FIELD*1.3){ considered++; if (stab[i] > 0.7) stableCount++; }
+        if (nW>0 && nr < FIELD*1.3){ considered++; if (stab[i] > 0.7) stableCount++; }
       }
-      // harmony = share of bound particles riding stable orbits
       const h = considered>40 ? (stableCount/considered)*100 : 0;
       harmony += (h - harmony)*0.04;
     }
@@ -557,6 +595,16 @@
       const s = r.from + (r.to-r.from)*(1-r.life);
       r.sp.scale.set(s,s,1); r.sp.material.opacity = r.life*0.6;
     }
+    for (const fl of filaments){
+      if (!fl.active) continue;
+      fl.life -= 0.016/fl.max;
+      if (fl.life<=0){ fl.active=false; fl.mass=0; fl.sp.visible=false; fl.sp.material.opacity=0; continue; }
+      fl.mass = 1.2*fl.life;
+      fl.sp.position.set(fl.x,fl.y,fl.z);
+      const s = 14 + 40*fl.life;
+      fl.sp.scale.set(s,s,1);
+      fl.sp.material.opacity = fl.life*0.38;
+    }
   }
 
   /* ============================================================
@@ -570,6 +618,7 @@
     { id:'galaxy',      mark:'✺', t:'銀河',            c:'無数の星が、ひとつの大きな渦になった。' },
     { id:'merger',      mark:'⊛', t:'合体 ― 重力波',   c:'二つの重力が溶け合い、時空に波紋が走った。' },
     { id:'supernova',   mark:'☀', t:'超新星',          c:'光を食べきった重力源が、まばゆく爆ぜた。' },
+    { id:'stream',      mark:'⟿', t:'光の川',          c:'指のあとを追って、光が流れていった。' },
     { id:'harmony',     mark:'❈', t:'調和',            c:'宇宙のほとんどが、静かな軌道に落ち着いた。' },
     { id:'cosmos',      mark:'✷', t:'静かな宇宙',      c:'長いあいだ、この秩序は崩れなかった。' }
   ];
@@ -751,54 +800,63 @@
   }
 
   /* ============================================================
-     input — tap creates, drag orbits, hold forges mass
+     input — one finger paints, two fingers move the cosmos,
+     a two-finger tap births a binary, a long press forges mass
      ============================================================ */
   const chargeEl = document.getElementById('charge');
-  let press = null; // {x,y,t,moved,charge}
-  const TAP_MOVE = 8;
+  let press = null;            // active single-pointer gesture
+  let two = null;              // active two-finger gesture
+  let orbiting = false;        // desktop right-drag
+  let lastMouse = {x:0,y:0};
+  const TAP_MOVE = 9;
+  const EMIT = 26;
+  let emitPtr = 0;
   const plane = new THREE.Plane();
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
-  const hit = new THREE.Vector3();
+  const _hit = new THREE.Vector3();
+  const _fwd = new THREE.Vector3();
+  const _dir = new THREE.Vector3();
+  const _swirl = new THREE.Vector3();
 
   function screenToWorld(sx, sy){
     ndc.x = (sx/innerWidth)*2-1; ndc.y = -(sy/innerHeight)*2+1;
     ray.setFromCamera(ndc, camera);
-    const n = new THREE.Vector3().subVectors(camera.position, cam.target).normalize();
-    plane.setFromNormalAndCoplanarPoint(n, cam.target);
-    if (ray.ray.intersectPlane(plane, hit)) return hit.clone();
+    _fwd.subVectors(camera.position, cam.target).normalize();
+    plane.setFromNormalAndCoplanarPoint(_fwd, cam.target);
+    if (ray.ray.intersectPlane(plane, _hit)) return _hit.clone();
     return cam.target.clone();
   }
-  function massFromCharge(c){ return 1 + c*7; } // 0..1 -> 1..8
-
-  function down(x,y){
-    press = { x, y, sx:x, sy:y, t:performance.now(), moved:false, charge:0 };
+  function massFromCharge(c){ return 1 + c*7; }
+  function orbitBy(dx,dy){
+    cam.tTheta -= dx*0.005;
+    cam.tPhi = Math.max(PHI_MIN, Math.min(PHI_MAX, cam.tPhi - dy*0.005));
     lastInteract = performance.now();
-    dismissVeil();
+  }
+  function zoomBy(factor){ cam.tRadius = Math.max(RAD_MIN, Math.min(RAD_MAX, cam.tRadius*factor)); lastInteract=performance.now(); }
+
+  /* ---- single-pointer (one finger / left mouse): tap, hold, brush ---- */
+  function down(x,y){
+    press = { x, y, sx:x, sy:y, t:performance.now(), moved:false, charge:0, prevW:null, lastInk:0 };
+    lastInteract = performance.now(); dismissVeil();
   }
   function move(x,y){
     if (!press) return;
-    const dx=x-press.sx, dy=y-press.sy;
     if (!press.moved && (Math.abs(x-press.x)>TAP_MOVE || Math.abs(y-press.y)>TAP_MOVE)){
-      press.moved = true; hideCharge();
+      press.moved = true; hideCharge();              // a stroke begins
     }
-    if (press.moved){
-      cam.tTheta -= dx*0.005;
-      cam.tPhi   -= dy*0.005;
-      cam.tPhi = Math.max(PHI_MIN, Math.min(PHI_MAX, cam.tPhi));
-      press.sx=x; press.sy=y; lastInteract=performance.now();
-    }
+    press.x = x; press.y = y;
+    if (press.moved) lastInteract = performance.now();
   }
   function up(){
     if (!press) return;
-    if (!press.moved){
+    if (!press.moved){                                // a tap (or held tap) -> a star
       const w = screenToWorld(press.x, press.y);
       addWell(w.x, w.y, w.z, massFromCharge(press.charge));
       flash(w.x,w.y,w.z, 60+press.charge*120, 0xbcd0ff);
       if (press.charge>0.05) ripple(w.x,w.y,w.z, 120+press.charge*260);
     }
-    hideCharge();
-    press = null;
+    hideCharge(); press = null;
   }
   function showCharge(){
     if (!press || press.moved) return;
@@ -812,40 +870,114 @@
   }
   function hideCharge(){ chargeEl.style.opacity = 0; chargeEl.style.width='0'; chargeEl.style.height='0'; }
 
-  /* pointer + touch wiring */
-  canvas.addEventListener('mousedown', e=>{ down(e.clientX,e.clientY); });
-  window.addEventListener('mousemove', e=>{ if(press) move(e.clientX,e.clientY); });
-  window.addEventListener('mouseup', up);
-  canvas.addEventListener('wheel', e=>{ e.preventDefault(); cam.tRadius = Math.max(RAD_MIN, Math.min(RAD_MAX, cam.tRadius * (1+ (e.deltaY>0?0.1:-0.1)))); lastInteract=performance.now(); }, {passive:false});
+  /* ---- the brush: a stroke emits a stream of light and lays fading gravity ink ---- */
+  function brushUpdate(now){
+    if (!press || !press.moved){
+      if (brushCursor.visible){ brushCursor.material.opacity *= 0.82; if (brushCursor.material.opacity<0.02) brushCursor.visible=false; }
+      return;
+    }
+    const w = screenToWorld(press.x, press.y);
+    brushCursor.visible = true;
+    brushCursor.position.copy(w);
+    const bs = 30 + Math.sin(now*0.012)*5;
+    brushCursor.scale.set(bs,bs,1);
+    brushCursor.material.opacity = 0.55;
 
-  let pinch = null;
+    if (!press.prevW){ press.prevW = w.clone(); return; }
+    _dir.subVectors(w, press.prevW);
+    const speed = _dir.length();
+    if (speed > 1e-4) _dir.multiplyScalar(1/speed);
+    _fwd.subVectors(camera.position, cam.target).normalize();
+    _swirl.crossVectors(_dir, _fwd);
+    const launch = Math.min(6.5, 1.4 + speed*0.05);
+
+    for (let e=0;e<EMIT;e++){
+      const i = emitPtr; emitPtr = (emitPtr+1)%activeCount; const ix=i*3;
+      const j = 16;
+      pos[ix]   = w.x + (Math.random()-0.5)*j;
+      pos[ix+1] = w.y + (Math.random()-0.5)*j;
+      pos[ix+2] = w.z + (Math.random()-0.5)*j;
+      const sw = (Math.random()-0.35)*launch*0.7;
+      vel[ix]   = _dir.x*launch + _swirl.x*sw;
+      vel[ix+1] = _dir.y*launch + _swirl.y*sw;
+      vel[ix+2] = _dir.z*launch + _swirl.z*sw;
+      aTemp[i]  = 0.85;
+    }
+    if (now - press.lastInk > 45){ ink(w.x,w.y,w.z, 1.2, 2.6); press.lastInk = now; unlock('stream'); }
+    press.prevW.copy(w);
+    posAttr.needsUpdate = true; tempAttr.needsUpdate = true;
+  }
+
+  /* ---- two-finger tap births an orbiting binary ---- */
+  function spawnBinary(x1,y1,x2,y2){
+    dismissVeil();
+    const a = screenToWorld(x1,y1), b = screenToWorld(x2,y2);
+    const mid = new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+    const n = new THREE.Vector3().subVectors(camera.position, cam.target).normalize();
+    const ra = new THREE.Vector3().subVectors(a,mid);
+    const sep = Math.max(60, ra.length()*2);
+    const ta = new THREE.Vector3().crossVectors(n, ra).normalize();
+    const mass = 3.2;
+    const v = Math.sqrt(G*mass/Math.max(70,sep))*0.95;
+    const wa = addWell(a.x,a.y,a.z,mass);
+    const wb = addWell(b.x,b.y,b.z,mass);
+    wa.vx= ta.x*v; wa.vy= ta.y*v; wa.vz= ta.z*v;
+    wb.vx=-ta.x*v; wb.vy=-ta.y*v; wb.vz=-ta.z*v;
+    flash(mid.x,mid.y,mid.z, 150, 0xbcd0ff); ripple(mid.x,mid.y,mid.z, 280);
+  }
+
+  /* ---- mouse ---- */
+  canvas.addEventListener('contextmenu', e=>e.preventDefault());
+  canvas.addEventListener('mousedown', e=>{
+    if (e.button===2 || e.button===1){ orbiting=true; lastMouse={x:e.clientX,y:e.clientY}; dismissVeil(); }
+    else down(e.clientX, e.clientY);
+  });
+  window.addEventListener('mousemove', e=>{
+    if (orbiting){ orbitBy(e.clientX-lastMouse.x, e.clientY-lastMouse.y); lastMouse={x:e.clientX,y:e.clientY}; }
+    else if (press) move(e.clientX, e.clientY);
+  });
+  window.addEventListener('mouseup', e=>{ if (orbiting){ orbiting=false; } else up(); });
+  canvas.addEventListener('dblclick', e=>{ spawnBinary(e.clientX-46, e.clientY, e.clientX+46, e.clientY); });
+  canvas.addEventListener('wheel', e=>{ e.preventDefault(); zoomBy(1 + (e.deltaY>0?0.1:-0.1)); }, {passive:false});
+
+  /* ---- touch: 1 finger = brush, 2 fingers = move / tap = binary ---- */
   canvas.addEventListener('touchstart', e=>{
     e.preventDefault();
     if (e.touches.length===1){ down(e.touches[0].clientX, e.touches[0].clientY); }
-    else if (e.touches.length===2){
+    else if (e.touches.length>=2){
       press=null; hideCharge();
       const a=e.touches[0], b=e.touches[1];
-      pinch = { d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),
-                mx:(a.clientX+b.clientX)/2, my:(a.clientY+b.clientY)/2 };
+      two = { ax:a.clientX, ay:a.clientY, bx:b.clientX, by:b.clientY,
+              d:Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY),
+              mx:(a.clientX+b.clientX)/2, my:(a.clientY+b.clientY)/2,
+              t:performance.now(), moved:false };
+      dismissVeil();
     }
   }, {passive:false});
   canvas.addEventListener('touchmove', e=>{
     e.preventDefault();
     if (e.touches.length===1 && press){ move(e.touches[0].clientX, e.touches[0].clientY); }
-    else if (e.touches.length===2 && pinch){
+    else if (e.touches.length>=2 && two){
       const a=e.touches[0], b=e.touches[1];
-      const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+      const d=Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
       const mx=(a.clientX+b.clientX)/2, my=(a.clientY+b.clientY)/2;
-      cam.tRadius = Math.max(RAD_MIN, Math.min(RAD_MAX, cam.tRadius * (pinch.d/Math.max(1,d))));
-      cam.tTheta -= (mx-pinch.mx)*0.005;
-      cam.tPhi   -= (my-pinch.my)*0.005;
-      cam.tPhi = Math.max(PHI_MIN, Math.min(PHI_MAX, cam.tPhi));
-      pinch.d=d; pinch.mx=mx; pinch.my=my; lastInteract=performance.now();
+      if (Math.abs(d-two.d)>6 || Math.abs(mx-two.mx)>6 || Math.abs(my-two.my)>6) two.moved=true;
+      zoomBy(two.d/Math.max(1,d));
+      orbitBy(mx-two.mx, my-two.my);
+      two.d=d; two.mx=mx; two.my=my;
     }
   }, {passive:false});
   canvas.addEventListener('touchend', e=>{
     e.preventDefault();
-    if (e.touches.length===0){ if(press) up(); pinch=null; }
+    if (e.touches.length===0){
+      if (two){
+        if (!two.moved && performance.now()-two.t < 320) spawnBinary(two.ax,two.ay,two.bx,two.by);
+        two=null;
+      } else if (press){ up(); }
+    } else {
+      // a finger lifted from a multi-touch: end gestures cleanly, don't start a stroke
+      two=null; press=null; hideCharge();
+    }
   }, {passive:false});
 
   /* ============================================================
@@ -873,6 +1005,27 @@
   $('btn-disc').addEventListener('click', openSheet);
   $('sheet-close').addEventListener('click', ()=> $('sheet').classList.remove('show'));
   $('sheet').addEventListener('click', e=>{ if(e.target===$('sheet')) $('sheet').classList.remove('show'); });
+
+  /* device tilt */
+  function onTilt(e){
+    const g=e.gamma||0, b=e.beta||0;
+    if (!tiltNeutral) tiltNeutral={g,b};
+    gTiltT.x = Math.max(-1, Math.min(1, (g-tiltNeutral.g)/38));
+    gTiltT.z = Math.max(-1, Math.min(1, (b-tiltNeutral.b)/38));
+  }
+  function enableTilt(){
+    const start=()=>{ window.addEventListener('deviceorientation', onTilt); tiltOn=true; tiltNeutral=null;
+      $('btn-tilt').classList.add('on'); showToast('傾き', '端末をかたむけて、宇宙を流す。'); };
+    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function'){
+      DeviceOrientationEvent.requestPermission().then(r=>{ r==='granted' ? start() : showToast('傾き','許可されませんでした。'); }).catch(()=>showToast('傾き','使えませんでした。'));
+    } else if (window.DeviceOrientationEvent){ start(); }
+    else { showToast('傾き','この端末では使えません。'); }
+  }
+  function disableTilt(){ window.removeEventListener('deviceorientation', onTilt); tiltOn=false; gTiltT.x=0; gTiltT.z=0; $('btn-tilt').classList.remove('on'); }
+  if ($('btn-tilt')){
+    if (!COARSE) $('btn-tilt').style.display='none';
+    $('btn-tilt').addEventListener('click', ()=>{ tiltOn ? disableTilt() : enableTilt(); });
+  }
 
   function openSheet(){
     const list = $('disc-list'); list.innerHTML='';
@@ -933,12 +1086,17 @@
     const dt = Math.min(0.05, (now-last)/1000) * 60; // normalized to ~60fps units
     last = now;
 
+    // ease the tilt current
+    gTilt.x += (gTiltT.x-gTilt.x)*0.04;
+    gTilt.z += (gTiltT.z-gTilt.z)*0.04;
+
     // idle cinematic drift
     if (now - lastInteract > 4500){ cam.tTheta += 0.0006*dt; }
 
     applyCamera();
 
     if (running) step(dt);
+    brushUpdate(now);
     updateVisuals(now);
     detect(now);
     audioStep(now);
