@@ -173,8 +173,18 @@
     border:1px solid var(--hair-strong);border-radius:4px;overflow:hidden;background:#000;
     box-shadow:0 10px 36px rgba(0,0,0,.6);}
   #ytbox iframe{display:block;border:0;width:100%;height:100%;}
-  #ytclose{position:absolute;top:4px;right:6px;z-index:2;width:24px;height:24px;line-height:22px;
+  #ytclose{position:absolute;top:4px;right:6px;z-index:3;width:24px;height:24px;line-height:22px;
     text-align:center;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;font-size:16px;}
+  #yttransport{position:absolute;inset:0;z-index:2;display:none;align-items:center;gap:9px;
+    padding:0 34px 0 12px;background:rgba(6,8,14,.96);font-family:"Cormorant Garamond",serif;}
+  #ytbox.mini{height:46px;width:min(360px,calc(100vw - 24px));}
+  #ytbox.mini #yttransport{display:flex;}
+  #ytbox.mini #ytclose{top:50%;right:8px;transform:translateY(-50%);background:transparent;width:22px;height:22px;line-height:20px;}
+  #ytplay{appearance:none;background:transparent;border:0;color:var(--ink);font-size:13px;cursor:pointer;width:18px;flex:0 0 auto;padding:0;}
+  #ytcur,#yttot{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;letter-spacing:.04em;flex:0 0 auto;}
+  #ytprog{flex:1;height:3px;background:var(--hair-strong);border-radius:2px;cursor:pointer;position:relative;}
+  #ytfill{position:absolute;left:0;top:0;height:100%;width:0;border-radius:2px;
+    background:linear-gradient(90deg,var(--gold),var(--blue));box-shadow:0 0 8px rgba(157,185,255,.5);}
   @media (max-width:480px){ #ytbox{width:248px;height:140px;} }
 
   #fps{position:fixed;z-index:9;right:8px;top:max(8px,env(safe-area-inset-top));
@@ -240,7 +250,7 @@
     </div>
   </div>
 
-  <div id="ytbox"><div id="ytclose">×</div><div id="ytframe" style="width:100%;height:100%"></div></div>
+  <div id="ytbox"><div id="ytclose">×</div><div id="ytframe" style="width:100%;height:100%"></div><div id="yttransport"><button id="ytplay">❚❚</button><span id="ytcur">0:00</span><div id="ytprog"><i id="ytfill"></i></div><span id="yttot">0:00</span></div></div>
 
   <div id="veil">
     <h1>宇宙を、その手で。</h1>
@@ -1216,7 +1226,8 @@
         width:'100%', height:'100%', videoId:id,
         playerVars:{ playsinline:1, rel:0, modestbranding:1 },
         events:{
-          onReady:(e)=>{ try{ e.target.playVideo(); }catch(_){} },
+          onReady:(e)=>{ try{ e.target.playVideo(); }catch(_){} updateYTDur(); },
+          onStateChange:(e)=> onYTState(e),
           onError:()=> showToast('YouTube','この動画は埋め込み再生できません。別の動画を試して。')
         }
       });
@@ -1231,7 +1242,33 @@
     if (reactMode!=='mic') startMic();   // same tap also starts listening, so it reacts
     showToast('音楽','動画の ▶ を押すと、宇宙が反応します。');
   });
-  $('ytclose').addEventListener('click', ()=>{ try{ if(ytPlayer&&ytPlayer.stopVideo) ytPlayer.stopVideo(); }catch(e){} $('ytbox').style.display='none'; });
+
+  /* transport bar: shows elapsed / total, collapses the video away */
+  let ytTimer=null;
+  function fmtT(s){ s=Math.max(0,Math.floor(s||0)); const m=(s/60)|0, ss=s%60; return m+':'+(ss<10?'0':'')+ss; }
+  function updateYTDur(){ try{ $('yttot').textContent = fmtT(ytPlayer.getDuration()); }catch(e){} }
+  function ytTick(){ try{ const c=ytPlayer.getCurrentTime(), d=ytPlayer.getDuration()||1;
+    $('ytcur').textContent=fmtT(c); $('ytfill').style.width=Math.min(100,c/d*100)+'%'; }catch(e){} }
+  function onYTState(e){
+    const S = window.YT && YT.PlayerState; if (!S) return;
+    if (e.data===S.PLAYING){
+      $('ytbox').classList.add('mini');
+      $('ytplay').textContent='❚❚';
+      updateYTDur();
+      if (!ytTimer) ytTimer=setInterval(ytTick, 500);
+    } else if (e.data===S.PAUSED || e.data===S.ENDED){
+      $('ytplay').textContent='▶';
+    }
+  }
+  $('ytplay').addEventListener('click', ()=>{ try{ const S=YT.PlayerState;
+    if (ytPlayer.getPlayerState()===S.PLAYING) ytPlayer.pauseVideo(); else ytPlayer.playVideo(); }catch(e){} });
+  $('ytprog').addEventListener('click', e=>{ try{ const r=$('ytprog').getBoundingClientRect();
+    const f=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); ytPlayer.seekTo(f*(ytPlayer.getDuration()||0), true); ytTick(); }catch(_){} });
+  $('ytclose').addEventListener('click', ()=>{
+    try{ if(ytPlayer&&ytPlayer.stopVideo) ytPlayer.stopVideo(); }catch(e){}
+    if (ytTimer){ clearInterval(ytTimer); ytTimer=null; }
+    $('ytbox').classList.remove('mini'); $('ytbox').style.display='none';
+  });
 
   function openSheet(){
     const list = $('disc-list'); list.innerHTML='';
