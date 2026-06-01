@@ -169,13 +169,13 @@
   .ytrow button:hover{background:rgba(157,185,255,.24);}
 
   #ytbox{position:fixed;z-index:13;display:none;right:max(12px,env(safe-area-inset-right));
-    bottom:calc(76px + env(safe-area-inset-bottom));width:220px;height:124px;
+    bottom:calc(78px + env(safe-area-inset-bottom));width:300px;height:170px;
     border:1px solid var(--hair-strong);border-radius:4px;overflow:hidden;background:#000;
     box-shadow:0 10px 36px rgba(0,0,0,.6);}
-  #ytbox iframe{display:block;border:0;}
-  #ytclose{position:absolute;top:4px;right:6px;z-index:2;width:22px;height:22px;line-height:20px;
-    text-align:center;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:15px;}
-  @media (max-width:480px){ #ytbox{width:168px;height:95px;} }
+  #ytbox iframe{display:block;border:0;width:100%;height:100%;}
+  #ytclose{position:absolute;top:4px;right:6px;z-index:2;width:24px;height:24px;line-height:22px;
+    text-align:center;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;font-size:16px;}
+  @media (max-width:480px){ #ytbox{width:248px;height:140px;} }
 
   #fps{position:fixed;z-index:9;right:8px;top:max(8px,env(safe-area-inset-top));
     font-size:9px;letter-spacing:.1em;color:var(--faint);opacity:0;font-variant-numeric:tabular-nums;}
@@ -234,7 +234,7 @@
       <p class="mnote">音に合わせて、宇宙がうねり、新しい星が生まれます。</p>
       <button class="mrow" id="m-mic"><span class="mi">🎤</span><span><b>聴く（マイク）</b><i>スピーカーで流せば、YouTube でも何でも反応します</i></span></button>
       <label class="mrow" id="m-file"><span class="mi">📁</span><span><b>曲を読み込む</b><i>自分の曲（mp3 / wav）なら、ぴったり同期します</i></span><input type="file" accept="audio/*" id="m-file-input" hidden></label>
-      <div class="mrow"><span class="mi">▶</span><span style="flex:1"><b>YouTube の動画を出す</b><i>URL を貼って再生 →　🎤 をオンに</i><span class="ytrow"><input id="m-yt-url" placeholder="https://youtu.be/..."><button id="m-yt-go">出す</button></span></span></div>
+      <div class="mrow"><span class="mi">▶</span><span style="flex:1"><b>YouTube の動画を出す</b><i>「出す」→ マイクを許可 → 動画の ▶ を押す（スピーカーで再生）</i><span class="ytrow"><input id="m-yt-url" placeholder="https://youtu.be/..."><button id="m-yt-go">出す</button></span></span></div>
       <p class="mnote dim">※ YouTube の音は技術上、直接は解析できません。スピーカーで流して 🎤 で“聴いて”反応させます。自分の曲を読み込めば完全に同期します。</p>
       <div class="sheet-close" id="msheet-close">閉じる</div>
     </div>
@@ -1201,15 +1201,37 @@
   $('m-file-input').addEventListener('change', e=>{ if(e.target.files&&e.target.files[0]) loadAudioFile(e.target.files[0]); });
 
   function ytId(u){ const m=(u||'').match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/); return m?m[1]:null; }
+  let ytApiLoading=false, ytApiReady=false, ytPlayer=null, ytPending=null;
+  function loadYTApi(){
+    if (ytApiLoading) return; ytApiLoading=true;
+    const s=document.createElement('script'); s.src='https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+  window.onYouTubeIframeAPIReady = function(){ ytApiReady=true; if(ytPending!=null){ const id=ytPending; ytPending=null; makeYT(id); } };
+  function makeYT(id){
+    $('ytbox').style.display='block';
+    if (ytPlayer && ytPlayer.loadVideoById){ try{ ytPlayer.loadVideoById(id); ytPlayer.playVideo(); return; }catch(e){} }
+    try{
+      ytPlayer = new YT.Player('ytframe', {
+        width:'100%', height:'100%', videoId:id,
+        playerVars:{ playsinline:1, rel:0, modestbranding:1 },
+        events:{
+          onReady:(e)=>{ try{ e.target.playVideo(); }catch(_){} },
+          onError:()=> showToast('YouTube','この動画は埋め込み再生できません。別の動画を試して。')
+        }
+      });
+    }catch(e){ showToast('YouTube','プレイヤーを作れませんでした。'); }
+  }
   $('m-yt-go').addEventListener('click', ()=>{
     const id = ytId($('m-yt-url').value);
-    if (!id){ showToast('YouTube','URLを確認してください。'); return; }
-    $('ytframe').innerHTML = '<iframe width="100%" height="100%" src="https://www.youtube.com/embed/'+id+'?rel=0&playsinline=1" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>';
-    $('ytbox').style.display='block';
+    if (!id){ showToast('YouTube','URL を確認してください。'); return; }
+    loadYTApi();
+    if (ytApiReady) makeYT(id); else ytPending=id;
     $('msheet').classList.remove('show');
-    if (reactMode!=='mic') showToast('音楽','再生したら 🎤 をオンに。');
+    if (reactMode!=='mic') startMic();   // same tap also starts listening, so it reacts
+    showToast('音楽','動画の ▶ を押すと、宇宙が反応します。');
   });
-  $('ytclose').addEventListener('click', ()=>{ $('ytframe').innerHTML=''; $('ytbox').style.display='none'; });
+  $('ytclose').addEventListener('click', ()=>{ try{ if(ytPlayer&&ytPlayer.stopVideo) ytPlayer.stopVideo(); }catch(e){} $('ytbox').style.display='none'; });
 
   function openSheet(){
     const list = $('disc-list'); list.innerHTML='';
